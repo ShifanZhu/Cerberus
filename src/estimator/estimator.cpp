@@ -382,6 +382,7 @@ bool Estimator::getIMUAndLegInterval(double t0, double t1,
             contactFlagVector.push_back(contactFlagBufList.front());
             contactFlagBufList.pop();
         }
+        // push the one that is just larger than t1
         accVector.push_back(accBuf.front());
         gyrVector.push_back(gyrBuf.front());
         jointAngVector.push_back(legAngBufList.front());
@@ -627,7 +628,7 @@ void Estimator::processIMULeg(double t, double dt,
         il_pre_integrations[frame_count]->push_back(dt, linear_acceleration, angular_velocity, joint_angle, joint_velocity, foot_contact);
         // if(solver_flag != NON_LINEAR)
         //        tmp_pre_integration->push_back(dt, linear_acceleration, angular_velocity);
-        tmp_il_pre_integration->push_back(dt, linear_acceleration, angular_velocity, joint_angle, joint_velocity, foot_contact);
+        tmp_il_pre_integration->push_back(dt, linear_acceleration, angular_velocity, joint_angle, joint_velocity, foot_contact); // seems only related to initialization
 
         dt_buf[frame_count].push_back(dt);
         linear_acceleration_buf[frame_count].push_back(linear_acceleration);
@@ -1109,7 +1110,7 @@ void Estimator::optimization()
         // construct new marginlization_factor
         MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
         problem.AddResidualBlock(marginalization_factor, NULL,
-                                 last_marginalization_parameter_blocks);
+                                 last_marginalization_parameter_blocks); // residual from previous
     }
     if (USE_LEG && USE_IMU)
     {
@@ -1374,7 +1375,7 @@ void Estimator::optimization()
         last_marginalization_info = marginalization_info;
         last_marginalization_parameter_blocks = parameter_blocks;
     }
-    else
+    else // MARGIN_SECOND_NEW
     {
         if (last_marginalization_info &&
             std::count(std::begin(last_marginalization_parameter_blocks), std::end(last_marginalization_parameter_blocks), para_Pose[WINDOW_SIZE - 1]))

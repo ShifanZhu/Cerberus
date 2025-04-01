@@ -4,6 +4,7 @@
 
 #include "imu_leg_factor.h"
 
+// Only for testing, not used in the final implementation
 void IMULegFactor::checkJacobian(const double *const *parameters) {
     Eigen::Vector3d Pi(parameters[0][0], parameters[0][1], parameters[0][2]);
     Eigen::Quaterniond Qi(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);

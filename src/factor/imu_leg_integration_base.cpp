@@ -232,18 +232,19 @@ void IMULegIntegrationBase::midPointIntegration(double _dt, const Vector3d &_acc
     for (int j = 0; j < NUM_OF_LEG; j++)
     {
         // calculate fk of each leg
+        // (joint angle, kinematic parameters, fixed kinematic parameters)
         fi.push_back(a1_kin.fk(_phi_0.segment<3>(3 * j), linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j), rho_fix_list[j]));
-        fip1.push_back(a1_kin.fk(_phi_1.segment<3>(3 * j), linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j), rho_fix_list[j]));
+        fip1.push_back(a1_kin.fk(_phi_1.segment<3>(3 * j), linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j), rho_fix_list[j])); // p1 means next time step (plus one)
         // calculate jacobian of each leg
         Ji.push_back(a1_kin.jac(_phi_0.segment<3>(3 * j), linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j), rho_fix_list[j]));
         Jip1.push_back(a1_kin.jac(_phi_1.segment<3>(3 * j), linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j), rho_fix_list[j]));
 
-        // calculate vm
-        vi.push_back(-R_br * Ji[j] * _dphi_0.segment<3>(3 * j) - R_w_0_x * (p_br + R_br * fi[j]));
+        // calculate vm (vi is body velocity) and (vip1 is body velocity at next time step) Eq8 in the paper
+        vi.push_back(-R_br * Ji[j] * _dphi_0.segment<3>(3 * j) - R_w_0_x * (p_br + R_br * fi[j])); // R_br is R_body_robot, fi is the foot position in robot frame (forward kinematics)
         vip1.push_back(-R_br * Jip1[j] * _dphi_1.segment<3>(3 * j) - R_w_1_x * (p_br + R_br * fip1[j]));
 
-        result_delta_epsilon[j] = delta_epsilon[j] + 0.5 * (delta_q * vi[j] + result_delta_q * vip1[j]) * _dt;
-        result_linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j) = linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j);
+        result_delta_epsilon[j] = delta_epsilon[j] + 0.5 * (delta_q * vi[j] + result_delta_q * vip1[j]) * _dt; // average delta position between two timestamps
+        result_linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j) = linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j); //? result_linearized_rho doesn't change
     }
 
     // debug: record all four lo velocities, examine their difference to average
@@ -256,6 +257,7 @@ void IMULegIntegrationBase::midPointIntegration(double _dt, const Vector3d &_acc
         lo_veocities.col(j) = lo_v;
     }
 
+    // optimize the forward kinematic parameters (joint length, offset, etc)
     // calculate gi, hi - the kappa and eta in paper
     for (int j = 0; j < NUM_OF_LEG; j++)
     {
@@ -285,8 +287,12 @@ void IMULegIntegrationBase::midPointIntegration(double _dt, const Vector3d &_acc
         Eigen::Matrix<double, 9, 3> dJdphi1 = a1_kin.dJ_dq(_phi_1.segment<3>(3 * j), linearized_rho.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j), rho_fix_list[j]);
         hip1.push_back(result_delta_q.toRotationMatrix() * (R_br * kron_dphi1 * dJdphi1 + R_w_1_x * R_br * Jip1[j]));
     }
-    Vector12d uncertainties;
+    Vector12d uncertainties; // uncertainty about contact status
 
+    // contact_sensor_type:
+    // 0 use KF output;
+    // 1 use plan contact;
+    // 2 use foot force sensor reading(then a complicated force model is needed)
     if (CONTACT_SENSOR_TYPE == 0 || CONTACT_SENSOR_TYPE == 1)
     {
         for (int j = 0; j < NUM_OF_LEG; j++)
@@ -857,6 +863,7 @@ IMULegIntegrationBase::evaluate(const Vector3d &Pi, const Quaterniond &Qi, const
     Eigen::Matrix3d dv_dba = jacobian.block<3, 3>(ILO_V, ILO_BA);
     Eigen::Matrix3d dv_dbg = jacobian.block<3, 3>(ILO_V, ILO_BG);
 
+    // For leg part
     Eigen::Matrix3d dep1_dbg = jacobian.block<3, 3>(ILO_EPS1, ILO_BG);
     Eigen::Matrix<double, 3, RHO_OPT_SIZE> dep1_drho1 = jacobian.block<3, RHO_OPT_SIZE>(ILO_EPS1, ILO_RHO1);
     Eigen::Matrix3d dep2_dbg = jacobian.block<3, 3>(ILO_EPS2, ILO_BG);
@@ -870,27 +877,34 @@ IMULegIntegrationBase::evaluate(const Vector3d &Pi, const Quaterniond &Qi, const
     Eigen::Vector3d dbg = Bgi - linearized_bg;
 
     Vector_rho drho = rhoi - linearized_rho;
+    // End of leg part
 
+    // correction when bias change (first order approximation)
     Eigen::Quaterniond corrected_delta_q = delta_q * Utility::deltaQ(dq_dbg * dbg);
     Eigen::Vector3d corrected_delta_v = delta_v + dv_dba * dba + dv_dbg * dbg;
     Eigen::Vector3d corrected_delta_p = delta_p + dp_dba * dba + dp_dbg * dbg;
 
+    // For leg part
     std::vector<Eigen::Vector3d> corrected_delta_epsilon;
     corrected_delta_epsilon.resize(4);
     corrected_delta_epsilon[0] = delta_epsilon[0] + dep1_dbg * dbg + dep1_drho1 * drho.segment<RHO_OPT_SIZE>(0 * RHO_OPT_SIZE);
     corrected_delta_epsilon[1] = delta_epsilon[1] + dep2_dbg * dbg + dep2_drho2 * drho.segment<RHO_OPT_SIZE>(1 * RHO_OPT_SIZE);
     corrected_delta_epsilon[2] = delta_epsilon[2] + dep3_dbg * dbg + dep3_drho3 * drho.segment<RHO_OPT_SIZE>(2 * RHO_OPT_SIZE);
     corrected_delta_epsilon[3] = delta_epsilon[3] + dep4_dbg * dbg + dep4_drho4 * drho.segment<RHO_OPT_SIZE>(3 * RHO_OPT_SIZE);
+    // End of leg part
 
+    // Eq. 13
     residuals.block<3, 1>(ILO_P, 0) = Qi.inverse() * (0.5 * G * sum_dt * sum_dt + Pj - Pi - Vi * sum_dt) - corrected_delta_p;
     residuals.block<3, 1>(ILO_R, 0) = 2 * (corrected_delta_q.inverse() * (Qi.inverse() * Qj)).vec();
     residuals.block<3, 1>(ILO_V, 0) = Qi.inverse() * (G * sum_dt + Vj - Vi) - corrected_delta_v;
 
+    // For leg part   eq. 18
     for (int j = 0; j < NUM_OF_LEG; j++)
     {
         residuals.block<3, 1>(ILO_EPS1 + 3 * j, 0) = Qi.inverse() * (Pj - Pi) - corrected_delta_epsilon[j];
         residuals.block<RHO_OPT_SIZE, 1>(ILO_RHO1 + RHO_OPT_SIZE * j, 0) = rhoj.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j) - rhoi.segment<RHO_OPT_SIZE>(RHO_OPT_SIZE * j);
     }
+    // End of leg part
     residuals.block<3, 1>(ILO_BA, 0) = Baj - Bai;
     residuals.block<3, 1>(ILO_BG, 0) = Bgj - Bgi;
 

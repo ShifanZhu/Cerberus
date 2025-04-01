@@ -21,8 +21,8 @@ find_package(catkin REQUIRED COMPONENTS
 #    unitree_legged_msgs
 )
 
-find_package(OpenCV REQUIRED)
-# message(WARNING "OpenCV_VERSION: ${OpenCV_VERSION}")
+find_package(OpenCV 4.4.0 REQUIRED)
+message(WARNING "OpenCV_VERSION: ${OpenCV_VERSION}")
 
 find_package(Ceres REQUIRED)
 #message(WARNING "CERES_LIBRARIES: ${CERES_LIBRARIES}")

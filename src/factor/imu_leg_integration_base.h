@@ -80,7 +80,7 @@ public:
 
     // the output of optimization,
     Eigen::Vector3d linearized_ba, linearized_bg;
-    Vector_rho linearized_rho;
+    Vector_rho linearized_rho; // kinematic parameters
     Vector4i foot_contact_flag;
 
 private:
